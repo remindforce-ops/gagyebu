@@ -92,7 +92,8 @@ function itemEl(e) {
   b.innerHTML = '<span class="badge"></span><span class="main"><div class="t1"></div><div class="t2"></div></span><span class="amt"></span>';
   b.querySelector('.badge').textContent = (e.category || '기타').slice(0, 2);
   b.querySelector('.t1').textContent = e.place || e.memo || e.category || e.type;
-  b.querySelector('.t2').textContent = [e.category, e.method, e.place && e.memo].filter(Boolean).join(' · ');
+  b.querySelector('.t2').textContent = [e.category, e.method, e.items && e.items.length ? `품목 ${e.items.length}개` : '', e.place && e.memo]
+    .filter(Boolean).join(' · ');
   const amt = b.querySelector('.amt');
   amt.textContent = (e.type === '수입' ? '+' : '-') + won(e.amount);
   amt.classList.add(e.type === '수입' ? 'income' : 'expense');
@@ -149,6 +150,8 @@ function openEntry(e = null, draft = null) {
   $('memo').value = (v && v.memo) || '';
   state.form = { category: (v && v.category) || '', method: (v && v.method) || '' };
   drawChips();
+  $('itemRows').replaceChildren(...((v && v.items) || []).map(itemRow));
+  updateItemsSum();
   $('entryDialog').showModal();
   if (!e && !draft) $('amount').focus();
 }
@@ -156,6 +159,62 @@ function openEntry(e = null, draft = null) {
 $('amount').addEventListener('input', (ev) => {
   const digits = ev.target.value.replace(/\D/g, '').replace(/^0+/, '').slice(0, 12);
   ev.target.value = digits ? Number(digits).toLocaleString('ko-KR') : '';
+  updateItemsSum();
+});
+
+// ---------- 품목 ----------
+const toNum = (s) => Number(String(s).replace(/[^\d-]/g, '')) || 0;
+const fmt = (n) => (n ? n.toLocaleString('ko-KR') : '');
+
+// 한 품목 = 품명 한 줄 + [수량] × [단가] = [금액] [삭제]
+function itemRow(it = {}) {
+  const row = document.createElement('div');
+  row.className = 'item-row';
+  row.innerHTML =
+    '<input class="i-name" maxlength="60" placeholder="품명" autocomplete="off">' +
+    '<div class="i-nums">' +
+    '<input class="i-qty" inputmode="numeric" placeholder="수량" aria-label="수량"><span>×</span>' +
+    '<input class="i-price" inputmode="numeric" placeholder="단가" aria-label="단가"><span>=</span>' +
+    '<input class="i-amount" inputmode="numeric" placeholder="금액" aria-label="금액">' +
+    '<button type="button" class="icon-btn i-del" aria-label="품목 삭제">✕</button></div>';
+  const [name, qty, price, amount] = ['.i-name', '.i-qty', '.i-price', '.i-amount'].map((s) => row.querySelector(s));
+  name.value = it.name || '';
+  qty.value = it.qty || '';
+  price.value = fmt(it.price);
+  amount.value = fmt(it.amount);
+  const money = (inp) => { const n = toNum(inp.value); inp.value = n ? n.toLocaleString('ko-KR') : (inp.value.trim() === '-' ? '-' : ''); };
+  // 수량이나 단가를 바꾸면 금액을 다시 계산 (할인처럼 금액만 있는 줄은 금액을 직접 입력)
+  const recalc = () => { const q = toNum(qty.value), p = toNum(price.value); if (q && p) amount.value = fmt(q * p); updateItemsSum(); };
+  qty.addEventListener('input', () => { qty.value = qty.value.replace(/\D/g, '').slice(0, 4); recalc(); });
+  price.addEventListener('input', () => { money(price); recalc(); });
+  amount.addEventListener('input', () => { money(amount); updateItemsSum(); });
+  row.querySelector('.i-del').addEventListener('click', () => { row.remove(); updateItemsSum(); });
+  return row;
+}
+
+function readItems() {
+  return [...$('itemRows').children].map((row) => ({
+    name: row.querySelector('.i-name').value.trim(),
+    qty: toNum(row.querySelector('.i-qty').value),
+    price: toNum(row.querySelector('.i-price').value),
+    amount: toNum(row.querySelector('.i-amount').value),
+  })).filter((it) => it.name || it.amount);
+}
+
+function updateItemsSum() {
+  const items = readItems();
+  if (!items.length) { $('itemsSum').textContent = ''; return; }
+  const sum = items.reduce((s, it) => s + it.amount, 0);
+  const total = toNum($('amount').value);
+  const diff = total - sum;
+  $('itemsSum').textContent = `품목 합계 ${won(sum)}` + (total && diff ? ` · 금액과 ${won(Math.abs(diff))} 차이` : '');
+  $('itemsSum').classList.toggle('warn', !!(total && diff));
+}
+
+$('addItemBtn').addEventListener('click', () => {
+  const row = itemRow();
+  $('itemRows').append(row);
+  row.querySelector('.i-name').focus();
 });
 $('entryForm').querySelectorAll('input[name="type"]').forEach((r) => r.addEventListener('change', () => {
   if (!CATEGORIES[currentType()].includes(state.form.category)) state.form.category = '';
@@ -178,7 +237,9 @@ $('entryForm').addEventListener('submit', async (ev) => {
     place: $('place').value.trim(),
     memo: $('memo').value.trim(),
     createdAt: state.editing ? state.editing.createdAt : new Date().toISOString(),
+    items: readItems(),
   };
+  if (e.items.some((it) => !it.name)) { $('entryError').textContent = '품명이 비어 있는 품목이 있어요.'; return; }
   $('saveBtn').disabled = true;
   try {
     if (state.editing) {
@@ -267,7 +328,7 @@ const CATEGORY_WORDS = [
   ['카페·간식', /카페|커피|coffee|스타벅스|starbucks|이디야|투썸|메가mgc|메가커피|빽다방|컴포즈|할리스|폴바셋|베이커리|파리바게뜨|뚜레쥬르|배스킨|던킨|디저트/i],
   ['의료·건강', /약국|병원|의원|치과|한의원|안과|피부과|정형외과|내과|소아과|이비인후과/],
   ['교통', /주유|주차|택시|버스|철도|코레일|ktx|srt|고속도로|하이패스|충전소|오일뱅크|sk에너지|gs칼텍스|s-oil/i],
-  ['문화·여가', /영화|cgv|메가박스|롯데시네마|서점|교보문고|yes24|노래|pc방|볼링|헬스|공연|티켓/i],
+  ['문화·여가', /영화|cgv|메가박스|롯데시네마|문고|책방|교보문고|yes24|노래|pc방|볼링|헬스|공연|티켓/i],
   ['생활용품', /다이소|이마트|홈플러스|롯데마트|코스트코|트레이더스|하나로마트|마트|생활용품/i],
   ['쇼핑', /올리브영|백화점|아울렛|무신사|쿠팡|유니클로|자라|h&m|의류/i],
   ['식비', /식당|음식|김밥|분식|국밥|치킨|피자|버거|맥도날드|롯데리아|맘스터치|서브웨이|반점|짬뽕|족발|보쌈|고기|갈비|삼겹|횟집|초밥|돈까스|라멘|국수|냉면|편의점|gs25|\bcu\b|세븐일레븐|7-eleven|이마트24|미니스톱|도시락|배달의민족|요기요/i],
@@ -281,6 +342,70 @@ function amountsIn(line) {
     if (n >= 100 && n <= 50000000) out.push(n);
   }
   return out;
+}
+
+// 품목 줄 인식. 지원 형식:
+//   "001 서울우유 1L  2,650  2  5,300"          (품명 단가 수량 금액)
+//   "서울우유 1L" + 다음 줄 "8801115114154 2,650 2 5,300" (바코드 줄 분리)
+//   "신라면 2 9,960"                              (품명 수량 금액)
+//   "행사할인 -1,000"                             (할인)
+// 범위는 '상품명/품명' 머리글 다음 줄부터 합계·과세 같은 요약 줄 전까지입니다.
+function parseItems(lines) {
+  const sq = (l) => l.replace(/\s/g, '');
+  const isNum = (t) => /^-?\d{1,3}(?:[,.]\d{3})+-?$|^-?\d+-?$/.test(t);
+  const val = (t) => (/^-|-$/.test(t) ? -1 : 1) * Number(t.replace(/[^\d]/g, ''));
+  const SUMMARY = /합계|총액|총금액|결제|과세|면세|부가세|받을|청구|소계|공급가|total/i;
+  const NOT_ITEM = /사업자|전화|tel|주소|카드|승인|일시|pos|영수증|대표|가맹점|상호|교환|환불/i;
+
+  const h = lines.findIndex((l) => /(상품명|품명|품목|메뉴명?).*(단가|수량|금액)|^(상품명|품명)$/.test(sq(l)));
+  const hasHeader = h >= 0;
+  const start = hasHeader ? h + 1 : 0;
+  let end = lines.findIndex((l, i) => i >= start && SUMMARY.test(sq(l)));
+  if (end < 0) end = lines.length;
+
+  const items = [];
+  let pendingName = '';
+  for (let i = start; i < end; i++) {
+    const tokens = lines[i].replace(/원/g, '').split(' ');
+    const nums = [];
+    while (tokens.length && isNum(tokens[tokens.length - 1])) nums.unshift(tokens.pop());
+    let name = tokens.join(' ')
+      .replace(/^\d{1,3}\s+/, '')            // 순번 001
+      .replace(/^[*#P]\s*/, '')               // 행사·면세 표시
+      .replace(/\b\d{8,14}\b/g, '')           // 바코드
+      .trim();
+    const values = nums.filter((t) => !/^\d{8,14}$/.test(t)).map(val);
+
+    if (!values.length) {                       // 숫자 없는 줄 = 다음 줄 숫자의 품명일 수 있음
+      if (/[가-힣a-zA-Z]/.test(name) && !NOT_ITEM.test(name)) pendingName = name;
+      continue;
+    }
+    if (!name) name = pendingName;
+    pendingName = '';
+    if (!name || NOT_ITEM.test(name)) continue;
+
+    const last = values[values.length - 1];
+    if (/할인|쿠폰|에누리/.test(name)) {          // 할인 줄은 금액만 음수로
+      if (hasHeader) items.push({ name, qty: 0, price: 0, amount: -Math.abs(last) });
+      continue;
+    }
+    if (values.length >= 3) {
+      const [a, b, c] = values.slice(-3);
+      if (a * b === c) {
+        const qty = b <= a ? b : a;
+        items.push({ name, qty, price: c / qty, amount: c });
+      } else if (hasHeader && b > 0 && b <= 99) {
+        items.push({ name, qty: b, price: a, amount: c });   // 품목 할인이 반영된 금액
+      }
+    } else if (values.length === 2) {
+      const [a, b] = values;
+      if (a > 0 && a <= 99 && b >= 100) items.push({ name, qty: a, price: Math.round(b / a), amount: b });
+      else if (hasHeader && a >= 100 && b % a === 0 && b / a <= 99) items.push({ name, qty: b / a, price: a, amount: b });
+    } else if (values.length === 1 && hasHeader && last >= 100) {
+      items.push({ name, qty: 1, price: last, amount: last });
+    }
+  }
+  return items.slice(0, 100);
 }
 
 function parseReceipt(text) {
@@ -325,7 +450,7 @@ function parseReceipt(text) {
       l.length >= 2 && l.length <= 30 && /[가-힣a-zA-Z]/.test(l) &&
       !/영수증|receipt|사업자|대표|전화|tel|주소|카드|매출|pos|고객|일시|번호|\d{2,4}-\d/i.test(l)) || '';
   }
-  place = place.replace(/^[\[\(<]+|[\]\)>]+$/g, '').trim().slice(0, 50);
+  place = place.replace(/\(주\)|㈜|주식회사/g, '').replace(/^[\[\(<]+|[\]\)>]+$/g, '').trim().slice(0, 50);
 
   // 결제수단
   const s = squash(text);
@@ -335,7 +460,7 @@ function parseReceipt(text) {
   const hay = place + ' ' + lines.slice(0, 15).join(' ');
   const hit = CATEGORY_WORDS.find(([, re]) => re.test(hay));
 
-  return { type: '지출', amount, date, place, method, category: hit ? hit[0] : '', memo: '' };
+  return { type: '지출', amount, date, place, method, category: hit ? hit[0] : '', memo: '', items: parseItems(lines) };
 }
 
 $('receiptBtn').addEventListener('click', () => $('receiptInput').click());

@@ -171,4 +171,14 @@ button, input { font: inherit; color: inherit; }
 }
 .fab.receipt.busy { animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .4; } }
+.item-rows { display: grid; gap: 10px; }
+.item-row { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 14px; }
+.item-row input { min-height: 40px; padding: 0 10px; font-size: 16px; }
+.item-row .i-nums { display: grid; grid-template-columns: 52px auto 1fr auto 1fr 36px; align-items: center; gap: 4px; }
+.item-row .i-nums span { color: var(--muted); font-size: 14px; }
+.item-row .i-qty, .item-row .i-price, .item-row .i-amount { text-align: right; font-variant-numeric: tabular-nums; min-width: 0; }
+.item-row .i-del { width: 36px; height: 36px; font-size: 16px; }
+.items-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.items-foot .warn { color: var(--expense); }
+#itemsSum.warn { color: var(--expense); }
 </style>

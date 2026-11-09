@@ -3,7 +3,9 @@
 // 웹 앱 접근 권한이 '나만(MYSELF)'이라서, 내 구글 계정으로 로그인한 경우에만 열립니다.
 
 const SHEET = '내역';
-const HEADER = ['ID', '날짜', '구분', '금액', '카테고리', '결제수단', '사용처', '메모', '등록시각'];
+const HEADER = ['ID', '날짜', '구분', '금액', '카테고리', '결제수단', '가맹점명', '메모', '등록시각'];
+const ITEM_SHEET = '품목';
+const ITEM_HEADER = ['내역ID', '순번', '품명', '수량', '단가', '금액'];
 
 function doGet() {
   sheet_(); // 처음 실행 시 '내역' 탭과 머리글 준비
@@ -21,11 +23,27 @@ function include(name) {
 
 // ---------- 화면에서 google.script.run으로 호출하는 함수 ----------
 function apiList() { return list_(); }
-function apiAdd(entry) { return withLock_(() => { sheet_().appendRow(toRow_(entry)); }); }
-function apiUpdate(entry) {
-  return withLock_(() => { sheet_().getRange(rowOf_(entry.id), 1, 1, HEADER.length).setValues([toRow_(entry)]); });
+function apiAdd(entry) {
+  return withLock_(() => {
+    const items = toItemRows_(entry);
+    sheet_().appendRow(toRow_(entry));
+    appendItems_(items);
+  });
 }
-function apiRemove(id) { return withLock_(() => { sheet_().deleteRow(rowOf_(id)); }); }
+function apiUpdate(entry) {
+  return withLock_(() => {
+    const items = toItemRows_(entry);
+    sheet_().getRange(rowOf_(entry.id), 1, 1, HEADER.length).setValues([toRow_(entry)]);
+    removeItems_(entry.id);
+    appendItems_(items);
+  });
+}
+function apiRemove(id) {
+  return withLock_(() => {
+    sheet_().deleteRow(rowOf_(id));
+    removeItems_(id);
+  });
+}
 
 // 영수증 사진(JPEG base64)을 구글 드라이브 OCR로 읽어 글자만 돌려줍니다.
 // 사진은 OCR용 임시 문서로만 쓰고 바로 영구 삭제합니다(드라이브에 남지 않음).
@@ -58,8 +76,60 @@ function sheet_() {
     sh.getRange(1, 1, 1, HEADER.length).setValues([HEADER]).setFontWeight('bold');
     sh.setFrozenRows(1);
     sh.getRange('B:B').setNumberFormat('@'); // 날짜를 글자 그대로 저장
+  } else if (sh.getRange('G1').getValue() === '사용처') {
+    sh.getRange('G1').setValue('가맹점명'); // 이전 버전 머리글 이름 변경
   }
   return sh;
+}
+
+function itemSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(ITEM_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(ITEM_SHEET);
+    sh.getRange(1, 1, 1, ITEM_HEADER.length).setValues([ITEM_HEADER]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+// 품목은 '품목' 탭에 내역ID로 연결해 저장합니다.
+function toItemRows_(e) {
+  const items = Array.isArray(e && e.items) ? e.items : [];
+  if (items.length > 100) throw new Error('품목은 100개까지 저장할 수 있어요.');
+  return items.map((it, i) => {
+    if (!it || !String(it.name || '').trim()) throw new Error('품명이 비어 있는 품목이 있어요.');
+    return [text_(e.id), i + 1, text_(String(it.name).trim().slice(0, 60)),
+      Number(it.qty) || '', Number(it.price) || '', Number(it.amount) || 0];
+  });
+}
+function appendItems_(rows) {
+  if (!rows.length) return;
+  const sh = itemSheet_();
+  sh.getRange(sh.getLastRow() + 1, 1, rows.length, ITEM_HEADER.length).setValues(rows);
+}
+function removeItems_(id) {
+  const sh = itemSheet_();
+  const last = sh.getLastRow();
+  if (last < 2) return;
+  const ids = sh.getRange(2, 1, last - 1, 1).getValues();
+  for (let i = ids.length - 1; i >= 0; i--) {
+    if (String(ids[i][0]) === String(id)) sh.deleteRow(i + 2);
+  }
+}
+function itemsById_() {
+  const sh = itemSheet_();
+  const last = sh.getLastRow();
+  const map = {};
+  if (last < 2) return map;
+  sh.getRange(2, 1, last - 1, ITEM_HEADER.length).getValues().forEach((v) => {
+    if (v[0] === '') return;
+    (map[String(v[0])] = map[String(v[0])] || []).push({
+      seq: Number(v[1]) || 0, name: String(v[2]), qty: Number(v[3]) || 0, price: Number(v[4]) || 0, amount: Number(v[5]) || 0,
+    });
+  });
+  Object.values(map).forEach((list) => list.sort((a, b) => a.seq - b.seq));
+  return map;
 }
 
 function list_() {
@@ -67,6 +137,7 @@ function list_() {
   const n = sh.getLastRow() - 1;
   if (n < 1) return [];
   const tz = Session.getScriptTimeZone();
+  const items = itemsById_();
   return sh.getRange(2, 1, n, HEADER.length).getValues()
     .filter((v) => v[0] !== '')
     .map((v) => ({
@@ -76,6 +147,7 @@ function list_() {
       amount: Number(v[3]) || 0,
       category: String(v[4]), method: String(v[5]), place: String(v[6]), memo: String(v[7]),
       createdAt: v[8] instanceof Date ? v[8].toISOString() : String(v[8]),
+      items: items[String(v[0])] || [],
     }));
 }
 

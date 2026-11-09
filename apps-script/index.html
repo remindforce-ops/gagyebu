@@ -59,8 +59,16 @@
       <label class="field"><span>날짜</span><input type="date" id="date" required></label>
       <div class="field"><span>카테고리</span><div class="chips" id="categoryChips"></div></div>
       <div class="field"><span>결제수단</span><div class="chips" id="methodChips"></div></div>
-      <label class="field"><span>사용처</span><input id="place" maxlength="50" placeholder="예: 동네 마트" autocomplete="off"></label>
+      <label class="field"><span>가맹점명</span><input id="place" maxlength="50" placeholder="예: 이마트 역삼점" autocomplete="off"></label>
       <label class="field"><span>메모</span><input id="memo" maxlength="200" placeholder="선택" autocomplete="off"></label>
+      <div class="field">
+        <span>품목</span>
+        <div id="itemRows" class="item-rows"></div>
+        <div class="items-foot">
+          <button type="button" class="chip" id="addItemBtn">+ 품목 추가</button>
+          <span class="hint" id="itemsSum"></span>
+        </div>
+      </div>
       <p class="form-error" id="entryError"></p>
       <div class="actions">
         <button type="button" class="btn danger" id="deleteBtn" hidden>삭제</button>
