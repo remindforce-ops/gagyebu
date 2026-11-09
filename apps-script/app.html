@@ -1,3 +1,20 @@
+<script>
+// 구글시트와 통신: 같은 Apps Script의 서버 함수를 google.script.run으로 호출합니다.
+// 이 웹 앱은 '나만' 접근 가능하므로, 구글이 내 계정 로그인 여부를 직접 확인합니다.
+const Api = {
+  run(fn, ...args) {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler((e) => reject(new Error((e && e.message) || String(e))))[fn](...args);
+    });
+  },
+  list() { return this.run('apiList'); },
+  add(entry) { return this.run('apiAdd', entry); },
+  update(entry) { return this.run('apiUpdate', entry); },
+  remove(id) { return this.run('apiRemove', id); },
+};
+
 const CATEGORIES = {
   지출: ['식비', '카페·간식', '교통', '주거·통신', '생활용품', '쇼핑', '의료·건강', '문화·여가', '교육', '경조사·선물', '기타'],
   수입: ['급여', '부수입', '용돈', '금융수입', '기타'],
@@ -10,7 +27,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
-const state = { entries: [], sheetUrl: '', month: today().slice(0, 7), editing: null, form: { category: '', method: '' } };
+const state = { entries: [], month: today().slice(0, 7), editing: null, form: { category: '', method: '' } };
 
 function toast(msg) {
   const t = $('toast');
@@ -64,7 +81,7 @@ function render() {
     sec.querySelector('.day-items').append(...list.map(itemEl));
     return sec;
   }));
-  $('emptyMsg').hidden = items.length > 0 || !Api.isReady();
+  $('emptyMsg').hidden = items.length > 0;
 }
 
 function itemEl(e) {
@@ -84,13 +101,9 @@ function itemEl(e) {
 
 // ---------- 데이터 불러오기 ----------
 async function load() {
-  $('connectBanner').hidden = Api.isReady();
-  if (!Api.isReady()) { render(); return; }
   $('status').textContent = '불러오는 중…';
   try {
-    const data = await Api.list();
-    state.entries = data.entries;
-    state.sheetUrl = data.sheetUrl;
+    state.entries = await Api.list();
     $('status').textContent = '';
   } catch (err) {
     $('status').textContent = '불러오지 못했어요: ' + err.message;
@@ -150,7 +163,6 @@ $('entryForm').addEventListener('submit', async (ev) => {
   const amount = Number($('amount').value.replace(/\D/g, ''));
   if (!amount) { $('entryError').textContent = '금액을 입력해 주세요.'; return; }
   if (!state.form.category) { $('entryError').textContent = '카테고리를 골라 주세요.'; return; }
-  if (!Api.isReady()) { $('entryError').textContent = '아직 구글시트와 연결되지 않았어요. 연결 페이지에서 먼저 연결해 주세요.'; return; }
 
   const e = {
     id: state.editing ? state.editing.id : (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)),
@@ -202,26 +214,13 @@ $('deleteBtn').addEventListener('click', async () => {
 
 // ---------- 설정 ----------
 function openSettings() {
-  $('connState').textContent = Api.isReady()
-    ? '이 기기는 구글시트와 연결되어 있어요. 따로 로그인할 필요가 없어요.'
-    : '이 기기는 아직 연결되지 않았어요. 연결 페이지에서 버튼을 누르거나 QR 코드를 찍어 주세요.';
-  const link = $('openSheetLink');
-  link.hidden = !state.sheetUrl;
-  if (state.sheetUrl) link.href = state.sheetUrl;
-  $('disconnectBtn').hidden = !Api.isReady();
+  if (!$('qr').hasChildNodes() && window.QRCode) {
+    new QRCode($('qr'), { text: APP_URL, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+  }
   $('settingsDialog').showModal();
 }
 
 $('reloadBtn').addEventListener('click', () => { $('settingsDialog').close(); load(); });
-$('disconnectBtn').addEventListener('click', () => {
-  if (!confirm('이 기기의 연결을 해제할까요? (시트의 내역은 지워지지 않아요)')) return;
-  Api.disconnect();
-  state.entries = [];
-  state.sheetUrl = '';
-  $('settingsDialog').close();
-  load();
-  toast('이 기기의 연결을 해제했어요');
-});
 
 // ---------- 공통 ----------
 document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
@@ -238,9 +237,5 @@ $('nextMonth').addEventListener('click', () => shiftMonth(1));
 $('openSettings').addEventListener('click', openSettings);
 $('addBtn').addEventListener('click', () => openEntry());
 
-if (Api.takeSetupFromHash()) toast('구글시트와 연결했어요');
-window.addEventListener('hashchange', () => { if (Api.takeSetupFromHash()) { toast('구글시트와 연결했어요'); load(); } });
-// 이전 버전(구글 로그인 방식)에서 남은 값 정리
-store.del('gb.settings');
-store.del('gb.token');
 load();
+</script>

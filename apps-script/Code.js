@@ -1,45 +1,36 @@
 // 가계부 구글시트에 붙어 있는 Apps Script입니다.
-// 웹 앱으로 배포하면 GitHub Pages의 가계부 화면이 이 주소로 읽기/쓰기를 요청합니다.
-// 웹 앱 주소 자체가 열쇠 역할을 하므로, 주소를 다른 사람에게 공유하지 마세요.
+// 화면과 데이터 처리를 모두 이 웹 앱이 담당합니다.
+// 웹 앱 접근 권한이 '나만(MYSELF)'이라서, 내 구글 계정으로 로그인한 경우에만 열립니다.
 
-const APP_URL = 'https://remindforce-ops.github.io/gagyebu/';
 const SHEET = '내역';
 const HEADER = ['ID', '날짜', '구분', '금액', '카테고리', '결제수단', '사용처', '메모', '등록시각'];
 
-// 브라우저로 직접 열면 연결용 페이지(버튼 + QR 코드)를 보여 줍니다.
 function doGet() {
   sheet_(); // 처음 실행 시 '내역' 탭과 머리글 준비
-  const t = HtmlService.createTemplateFromFile('setup');
-  t.setupUrl = APP_URL + '#setup=' + encodeURIComponent(ScriptApp.getService().getUrl());
+  const t = HtmlService.createTemplateFromFile('index');
+  t.appUrl = ScriptApp.getService().getUrl();
+  t.sheetUrl = SpreadsheetApp.getActiveSpreadsheet().getUrl();
   return t.evaluate()
-    .setTitle('가계부 연결')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    .setTitle('가계부')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
 }
 
-// 가계부 화면에서 오는 요청: { action, entry?, id? }
-function doPost(e) {
-  let out;
-  try {
-    const req = JSON.parse(e.postData.contents);
-    out = { ok: true, data: handle_(req) };
-  } catch (err) {
-    out = { ok: false, error: String(err.message || err) };
-  }
-  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+function include(name) {
+  return HtmlService.createHtmlOutputFromFile(name).getContent();
 }
 
-function handle_(req) {
-  if (req.action === 'list') return { entries: list_(), sheetUrl: SpreadsheetApp.getActiveSpreadsheet().getUrl() };
+// ---------- 화면에서 google.script.run으로 호출하는 함수 ----------
+function apiList() { return list_(); }
+function apiAdd(entry) { return withLock_(() => { sheet_().appendRow(toRow_(entry)); }); }
+function apiUpdate(entry) {
+  return withLock_(() => { sheet_().getRange(rowOf_(entry.id), 1, 1, HEADER.length).setValues([toRow_(entry)]); });
+}
+function apiRemove(id) { return withLock_(() => { sheet_().deleteRow(rowOf_(id)); }); }
+
+function withLock_(fn) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
-  try {
-    if (req.action === 'add') { sheet_().appendRow(toRow_(req.entry)); return null; }
-    if (req.action === 'update') { const r = rowOf_(req.entry.id); sheet_().getRange(r, 1, 1, HEADER.length).setValues([toRow_(req.entry)]); return null; }
-    if (req.action === 'remove') { sheet_().deleteRow(rowOf_(req.id)); return null; }
-  } finally {
-    lock.releaseLock();
-  }
-  throw new Error('알 수 없는 요청입니다.');
+  try { fn(); return null; } finally { lock.releaseLock(); }
 }
 
 function sheet_() {
