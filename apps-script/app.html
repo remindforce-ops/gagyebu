@@ -402,7 +402,37 @@ function amountsIn(line) {
 //   "신라면 2 9,960"                              (품명 수량 금액)
 //   "행사할인 -1,000"                             (할인)
 // 범위는 '상품명/품명' 머리글 다음 줄부터 합계·과세 같은 요약 줄 전까지입니다.
-function parseItems(lines) {
+// '품명: 금액원, N개' 형식 (줄이 '된장:' / '10,500원, 2개'처럼 나뉘어도 처리)
+// 금액이 단가인지 N개 합친 금액인지는 영수증 합계와 맞는 쪽으로 정하고, 둘 다 안 맞으면 단가로 봅니다.
+function parseLabeledItems(region, NOT_ITEM, total) {
+  const merged = [];
+  for (const raw of region) {
+    const l = raw.trim();
+    const prev = merged[merged.length - 1];
+    if (prev !== undefined && !/\d/.test(prev) && /^-?\d/.test(l)) merged[merged.length - 1] = prev + ' ' + l;
+    else merged.push(l);
+  }
+  const AMOUNT = /(-?\d{1,3}(?:[,.]\d{3})+|-?\d+)\s*원/;
+  const QTY = /(\d{1,3})\s*(?:개|ea|병|봉지?|팩|캔|묶음|박스|통)(?![가-힣])/i;
+  const found = [];
+  for (const l of merged) {
+    const am = l.match(AMOUNT);
+    if (!am) continue;
+    const name = l.slice(0, am.index).replace(/[:：\-\s]+$/, '').replace(/^\d{1,3}[.)]?\s+/, '').trim();
+    if (!/[가-힣a-zA-Z]/.test(name) || NOT_ITEM.test(name) || /합계|총액|금액/.test(name)) continue;
+    const qm = l.slice(am.index + am[0].length).match(QTY) || l.slice(0, am.index).match(QTY);
+    const won = Number(am[1].replace(/[,.]/g, ''));
+    found.push({ name: qm && l.slice(0, am.index).match(QTY) ? name.replace(QTY, '').replace(/[:：\s,]+$/, '').trim() : name, qty: qm ? Number(qm[1]) : 1, won });
+  }
+  if (!found.length) return [];
+  const asLineTotal = found.reduce((s, it) => s + it.won, 0);
+  const useLineTotal = total && asLineTotal === total && found.some((it) => it.qty > 1);
+  return found.map(({ name, qty, won }) => useLineTotal
+    ? { name, qty, price: Math.round(won / qty), amount: won }
+    : { name, qty, price: won, amount: won * qty });
+}
+
+function parseItems(lines, total = 0) {
   const sq = (l) => l.replace(/\s/g, '');
   const isNum = (t) => /^-?\d{1,3}(?:[,.]\d{3})+-?$|^-?\d+-?$/.test(t);
   const val = (t) => (/^-|-$/.test(t) ? -1 : 1) * Number(t.replace(/[^\d]/g, ''));
@@ -414,6 +444,10 @@ function parseItems(lines) {
   const start = hasHeader ? h + 1 : 0;
   let end = lines.findIndex((l, i) => i >= start && SUMMARY.test(sq(l)));
   if (end < 0) end = lines.length;
+
+  // '품명: 금액원, N개' 형식
+  const labeled = parseLabeledItems(lines.slice(start, end), NOT_ITEM, total);
+  if (labeled.length) return labeled.slice(0, 100);
 
   // 열 단위로 읽힌 표를 먼저 확인 (한 줄 형식 영수증에서는 빈 결과라 아래 줄 단위 인식으로 넘어감)
   if (hasHeader) {
@@ -567,7 +601,7 @@ function parseReceipt(text) {
   const hay = place + ' ' + lines.slice(0, 15).join(' ');
   const hit = CATEGORY_WORDS.find(([, re]) => re.test(hay));
 
-  return { type: '지출', amount, date, place, method, category: hit ? hit[0] : '', memo: '', items: parseItems(lines) };
+  return { type: '지출', amount, date, place, method, category: hit ? hit[0] : '', memo: '', items: parseItems(lines, amount) };
 }
 
 $('receiptBtn').addEventListener('click', () => $('receiptInput').click());
