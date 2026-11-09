@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; background: #f4f5f7; color: #191c21; }
+    main { max-width: 420px; margin: 0 auto; padding: 32px 16px; text-align: center; }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    p { color: #6b7280; font-size: 15px; line-height: 1.5; margin: 0 0 20px; }
+    .btn { display: block; padding: 16px; border-radius: 14px; background: #3366ff; color: #fff; font-weight: 700; text-decoration: none; font-size: 17px; }
+    .card { background: #fff; border-radius: 20px; padding: 24px; margin-top: 24px; }
+    #qr { display: inline-block; padding: 12px; background: #fff; }
+    .warn { font-size: 13px; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>가계부 연결</h1>
+    <p>이 기기에서 가계부를 쓰려면 아래 버튼을 누르세요.</p>
+    <a class="btn" href="<?= setupUrl ?>" target="_top">이 기기에서 가계부 열기</a>
+    <div class="card">
+      <p><b>휴대폰</b>은 카메라로 아래 QR 코드를 찍으면 연결돼요.<br>연결된 화면에서 <b>홈 화면에 추가</b>를 하세요.</p>
+      <div id="qr"></div>
+    </div>
+    <p class="warn">이 페이지와 QR 코드는 다른 사람에게 보여 주지 마세요.</p>
+  </main>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script>
+    new QRCode(document.getElementById('qr'), { text: <?!= JSON.stringify(setupUrl) ?>, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.M });
+  </script>
+</body>
+</html>

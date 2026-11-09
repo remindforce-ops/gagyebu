@@ -15,7 +15,6 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
   <link rel="stylesheet" href="style.css">
-  <script src="https://accounts.google.com/gsi/client" async></script>
 </head>
 <body>
   <div class="app">
@@ -27,8 +26,7 @@
     </header>
 
     <div class="banner" id="connectBanner" hidden>
-      <p id="connectMsg">구글시트에 연결해야 내역을 불러올 수 있어요.</p>
-      <button class="btn primary" id="connectBtn">구글 연결</button>
+      <p>아직 구글시트와 연결되지 않았어요.<br><b>연결 페이지</b>에서 버튼을 누르거나 QR 코드를 찍어 주세요.</p>
     </div>
 
     <section class="card summary">
@@ -87,23 +85,18 @@
         <h2>설정</h2>
         <button type="button" class="icon-btn" data-close aria-label="닫기">✕</button>
       </div>
-      <p class="hint">아래 값은 이 기기의 브라우저에만 저장되고, 어디에도 공개되지 않아요.</p>
-      <label class="field"><span>Google OAuth Client ID</span><input id="clientId" autocomplete="off" spellcheck="false" placeholder="xxxx.apps.googleusercontent.com"></label>
-      <label class="field"><span>구글시트 주소 또는 ID</span><input id="sheetInput" autocomplete="off" spellcheck="false" placeholder="https://docs.google.com/spreadsheets/d/..."></label>
-      <p class="hint">시트가 없다면 저장 후 <b>새 시트 만들기</b>를 누르세요. 내 구글 드라이브에 '가계부' 시트가 생겨요.</p>
-      <p class="form-error" id="settingsError"></p>
+      <p class="hint" id="connState"></p>
       <div class="actions col">
-        <button type="submit" class="btn primary">저장하고 연결</button>
-        <button type="button" class="btn" id="createSheetBtn">새 시트 만들기</button>
         <a class="btn" id="openSheetLink" target="_blank" rel="noopener" hidden>구글시트 열기</a>
-        <button type="button" class="btn ghost" id="signOutBtn">구글 연결 해제</button>
+        <button type="button" class="btn" id="reloadBtn">새로고침</button>
+        <button type="button" class="btn ghost" id="disconnectBtn">이 기기 연결 해제</button>
       </div>
     </form>
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="sheets.js"></script>
+  <script src="api.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

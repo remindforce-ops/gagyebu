@@ -7,3 +7,5 @@ client_secret*
 token*.json
 .DS_Store
 Thumbs.db
+.clasp.json
+.clasprc.json

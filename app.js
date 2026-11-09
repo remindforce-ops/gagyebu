@@ -10,7 +10,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
-const state = { entries: [], month: today().slice(0, 7), editing: null, form: { category: '', method: '' } };
+const state = { entries: [], sheetUrl: '', month: today().slice(0, 7), editing: null, form: { category: '', method: '' } };
 
 function toast(msg) {
   const t = $('toast');
@@ -64,7 +64,7 @@ function render() {
     sec.querySelector('.day-items').append(...list.map(itemEl));
     return sec;
   }));
-  $('emptyMsg').hidden = items.length > 0 || !Sheets.isReady();
+  $('emptyMsg').hidden = items.length > 0 || !Api.isReady();
 }
 
 function itemEl(e) {
@@ -82,41 +82,20 @@ function itemEl(e) {
   return b;
 }
 
-function showConnect(msg) {
-  $('connectBanner').hidden = false;
-  if (msg) $('connectMsg').textContent = msg;
-}
-
 // ---------- 데이터 불러오기 ----------
 async function load() {
-  const s = Sheets.settings();
-  if (!s.clientId || !s.sheetId) {
-    showConnect('처음이시군요. 설정에서 Client ID와 구글시트를 등록해 주세요.');
-    $('connectBtn').textContent = '설정 열기';
-    render();
-    return;
-  }
-  $('connectBtn').textContent = '구글 연결';
-  if (!Sheets.token()) { showConnect('구글 연결이 필요해요. (보안상 1시간마다 다시 연결해요)'); render(); return; }
-  $('connectBanner').hidden = true;
+  $('connectBanner').hidden = Api.isReady();
+  if (!Api.isReady()) { render(); return; }
   $('status').textContent = '불러오는 중…';
   try {
-    await Sheets.ensureSheet();
-    state.entries = await Sheets.list();
+    const data = await Api.list();
+    state.entries = data.entries;
+    state.sheetUrl = data.sheetUrl;
     $('status').textContent = '';
   } catch (err) {
-    $('status').textContent = '';
-    if (err.auth) showConnect(err.message);
-    else toast(err.message);
+    $('status').textContent = '불러오지 못했어요: ' + err.message;
   }
   render();
-}
-
-async function connect() {
-  const s = Sheets.settings();
-  if (!s.clientId || !s.sheetId) return openSettings();
-  try { await Sheets.signIn(); await load(); }
-  catch (err) { toast(err.message); }
 }
 
 // ---------- 입력/수정 ----------
@@ -171,7 +150,7 @@ $('entryForm').addEventListener('submit', async (ev) => {
   const amount = Number($('amount').value.replace(/\D/g, ''));
   if (!amount) { $('entryError').textContent = '금액을 입력해 주세요.'; return; }
   if (!state.form.category) { $('entryError').textContent = '카테고리를 골라 주세요.'; return; }
-  if (!Sheets.isReady()) { $('entryError').textContent = '구글 연결이 필요해요. 닫고 상단의 [구글 연결]을 눌러 주세요.'; return; }
+  if (!Api.isReady()) { $('entryError').textContent = '아직 구글시트와 연결되지 않았어요. 연결 페이지에서 먼저 연결해 주세요.'; return; }
 
   const e = {
     id: state.editing ? state.editing.id : (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)),
@@ -187,10 +166,10 @@ $('entryForm').addEventListener('submit', async (ev) => {
   $('saveBtn').disabled = true;
   try {
     if (state.editing) {
-      await Sheets.update(e);
+      await Api.update(e);
       state.entries = state.entries.map((x) => (x.id === e.id ? e : x));
     } else {
-      await Sheets.add(e);
+      await Api.add(e);
       state.entries.push(e);
     }
     $('entryDialog').close();
@@ -199,7 +178,6 @@ $('entryForm').addEventListener('submit', async (ev) => {
     toast(state.editing ? '수정했어요' : '저장했어요');
   } catch (err) {
     $('entryError').textContent = err.message;
-    if (err.auth) showConnect(err.message);
   } finally {
     $('saveBtn').disabled = false;
   }
@@ -210,7 +188,7 @@ $('deleteBtn').addEventListener('click', async () => {
   if (!e || !confirm('이 내역을 삭제할까요?')) return;
   $('deleteBtn').disabled = true;
   try {
-    await Sheets.remove(e.id);
+    await Api.remove(e.id);
     state.entries = state.entries.filter((x) => x.id !== e.id);
     $('entryDialog').close();
     render();
@@ -224,51 +202,25 @@ $('deleteBtn').addEventListener('click', async () => {
 
 // ---------- 설정 ----------
 function openSettings() {
-  const s = Sheets.settings();
-  $('clientId').value = s.clientId;
-  $('sheetInput').value = s.sheetId;
-  $('settingsError').textContent = '';
+  $('connState').textContent = Api.isReady()
+    ? '이 기기는 구글시트와 연결되어 있어요. 따로 로그인할 필요가 없어요.'
+    : '이 기기는 아직 연결되지 않았어요. 연결 페이지에서 버튼을 누르거나 QR 코드를 찍어 주세요.';
   const link = $('openSheetLink');
-  link.hidden = !s.sheetId;
-  if (s.sheetId) link.href = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(s.sheetId)}/edit`;
+  link.hidden = !state.sheetUrl;
+  if (state.sheetUrl) link.href = state.sheetUrl;
+  $('disconnectBtn').hidden = !Api.isReady();
   $('settingsDialog').showModal();
 }
-function saveSettingsFromForm() {
-  Sheets.saveSettings({ clientId: $('clientId').value.trim(), sheetId: parseSheetId($('sheetInput').value) });
-}
 
-$('settingsForm').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  saveSettingsFromForm();
-  const s = Sheets.settings();
-  if (!s.clientId) { $('settingsError').textContent = 'Client ID를 입력해 주세요.'; return; }
-  if (!s.sheetId) { $('settingsError').textContent = '시트 주소를 넣거나 [새 시트 만들기]를 눌러 주세요.'; return; }
-  try {
-    if (!Sheets.token()) await Sheets.signIn();
-    $('settingsDialog').close();
-    await load();
-  } catch (err) { $('settingsError').textContent = err.message; }
-});
-
-$('createSheetBtn').addEventListener('click', async () => {
-  saveSettingsFromForm();
-  if (!Sheets.settings().clientId) { $('settingsError').textContent = 'Client ID를 먼저 입력해 주세요.'; return; }
-  if (Sheets.settings().sheetId && !confirm('이미 등록된 시트가 있어요. 새 시트로 바꿀까요? (기존 시트는 지워지지 않아요)')) return;
-  try {
-    if (!Sheets.token()) await Sheets.signIn();
-    await Sheets.create();
-    $('settingsDialog').close();
-    toast('내 구글 드라이브에 \'가계부\' 시트를 만들었어요');
-    await load();
-  } catch (err) { $('settingsError').textContent = err.message; }
-});
-
-$('signOutBtn').addEventListener('click', () => {
-  Sheets.signOut();
+$('reloadBtn').addEventListener('click', () => { $('settingsDialog').close(); load(); });
+$('disconnectBtn').addEventListener('click', () => {
+  if (!confirm('이 기기의 연결을 해제할까요? (시트의 내역은 지워지지 않아요)')) return;
+  Api.disconnect();
   state.entries = [];
+  state.sheetUrl = '';
   $('settingsDialog').close();
   load();
-  toast('구글 연결을 해제했어요');
+  toast('이 기기의 연결을 해제했어요');
 });
 
 // ---------- 공통 ----------
@@ -284,7 +236,11 @@ function shiftMonth(delta) {
 $('prevMonth').addEventListener('click', () => shiftMonth(-1));
 $('nextMonth').addEventListener('click', () => shiftMonth(1));
 $('openSettings').addEventListener('click', openSettings);
-$('connectBtn').addEventListener('click', connect);
 $('addBtn').addEventListener('click', () => openEntry());
 
+if (Api.takeSetupFromHash()) toast('구글시트와 연결했어요');
+window.addEventListener('hashchange', () => { if (Api.takeSetupFromHash()) { toast('구글시트와 연결했어요'); load(); } });
+// 이전 버전(구글 로그인 방식)에서 남은 값 정리
+store.del('gb.settings');
+store.del('gb.token');
 load();
