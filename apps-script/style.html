@@ -164,4 +164,11 @@ button, input { font: inherit; color: inherit; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .qr-box { text-align: center; display: grid; gap: 10px; justify-items: center; }
 #qr { padding: 10px; background: #fff; border-radius: 12px; }
+.fab.receipt {
+  bottom: calc(env(safe-area-inset-bottom) + 92px); width: 52px; height: 52px; margin-right: 4px;
+  background: var(--surface); color: var(--accent); border: 1px solid var(--line); box-shadow: var(--shadow);
+  display: grid; place-items: center;
+}
+.fab.receipt.busy { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .4; } }
 </style>

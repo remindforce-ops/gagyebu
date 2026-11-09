@@ -2,7 +2,16 @@
   "timeZone": "Asia/Seoul",
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
-  "oauthScopes": ["https://www.googleapis.com/auth/spreadsheets.currentonly"],
+  "dependencies": {
+    "enabledAdvancedServices": [
+      { "userSymbol": "Drive", "version": "v3", "serviceId": "drive" }
+    ]
+  },
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/spreadsheets.currentonly",
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/script.external_request"
+  ],
   "webapp": {
     "executeAs": "USER_DEPLOYING",
     "access": "MYSELF"

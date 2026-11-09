@@ -27,6 +27,23 @@ function apiUpdate(entry) {
 }
 function apiRemove(id) { return withLock_(() => { sheet_().deleteRow(rowOf_(id)); }); }
 
+// 영수증 사진(JPEG base64)을 구글 드라이브 OCR로 읽어 글자만 돌려줍니다.
+// 사진은 OCR용 임시 문서로만 쓰고 바로 영구 삭제합니다(드라이브에 남지 않음).
+function apiOcr(base64) {
+  if (typeof base64 !== 'string' || base64.length > 15 * 1024 * 1024) throw new Error('사진이 너무 커요.');
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64), 'image/jpeg', 'receipt.jpg');
+  const doc = Drive.Files.create({ name: '가계부-영수증-임시', mimeType: MimeType.GOOGLE_DOCS }, blob, { ocrLanguage: 'ko', fields: 'id' });
+  const auth = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+  try {
+    const res = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + doc.id + '/export?mimeType=text/plain',
+      { headers: auth, muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) throw new Error('영수증 글자를 읽지 못했어요. 다시 찍어 주세요.');
+    return res.getContentText('UTF-8');
+  } finally {
+    UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + doc.id, { method: 'delete', headers: auth, muteHttpExceptions: true });
+  }
+}
+
 function withLock_(fn) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);

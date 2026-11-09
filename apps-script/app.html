@@ -13,6 +13,7 @@ const Api = {
   add(entry) { return this.run('apiAdd', entry); },
   update(entry) { return this.run('apiUpdate', entry); },
   remove(id) { return this.run('apiRemove', id); },
+  ocr(base64) { return this.run('apiOcr', base64); },
 };
 
 const CATEGORIES = {
@@ -132,21 +133,24 @@ function drawChips() {
   chips($('methodChips'), METHODS, state.form.method, (v) => { state.form.method = v; drawChips(); });
 }
 
-function openEntry(e = null) {
+// e: 수정할 내역, draft: 영수증에서 읽어 미리 채울 값(새 내역)
+function openEntry(e = null, draft = null) {
   state.editing = e;
-  $('entryTitle').textContent = e ? '내역 수정' : '내역 추가';
+  const v = e || draft;
+  $('entryTitle').textContent = e ? '내역 수정' : draft ? '영수증에서 읽은 내역' : '내역 추가';
+  $('entryHint').hidden = !draft;
   $('deleteBtn').hidden = !e;
   $('entryError').textContent = '';
-  $('entryForm').querySelector(`input[name="type"][value="${e ? e.type : '지출'}"]`).checked = true;
-  $('amount').value = e ? e.amount.toLocaleString('ko-KR') : '';
+  $('entryForm').querySelector(`input[name="type"][value="${v ? v.type || '지출' : '지출'}"]`).checked = true;
+  $('amount').value = v && v.amount ? v.amount.toLocaleString('ko-KR') : '';
   // 다른 달을 보고 있을 때 새 내역은 그 달 1일이 아니라 오늘 날짜가 기본값
-  $('date').value = e ? e.date : today();
-  $('place').value = e ? e.place : '';
-  $('memo').value = e ? e.memo : '';
-  state.form = { category: e ? e.category : '', method: e ? e.method : '' };
+  $('date').value = (v && v.date) || today();
+  $('place').value = (v && v.place) || '';
+  $('memo').value = (v && v.memo) || '';
+  state.form = { category: (v && v.category) || '', method: (v && v.method) || '' };
   drawChips();
   $('entryDialog').showModal();
-  if (!e) $('amount').focus();
+  if (!e && !draft) $('amount').focus();
 }
 
 $('amount').addEventListener('input', (ev) => {
@@ -236,6 +240,125 @@ $('prevMonth').addEventListener('click', () => shiftMonth(-1));
 $('nextMonth').addEventListener('click', () => shiftMonth(1));
 $('openSettings').addEventListener('click', openSettings);
 $('addBtn').addEventListener('click', () => openEntry());
+
+// ---------- 영수증 ----------
+// 사진을 긴 변 2000px JPEG로 줄여 전송 시간을 줄입니다.
+function toJpegBase64(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, 2000 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * scale);
+      c.height = Math.round(img.naturalHeight * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL('image/jpeg', 0.85).split(',')[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('사진을 열지 못했어요. 다른 사진으로 해 주세요.')); };
+    img.src = url;
+  });
+}
+
+const RECEIPT_TOTAL_WORDS = ['결제금액', '승인금액', '받을금액', '청구금액', '합계금액', '총결제', '판매금액', '총금액', '총액', '합계', 'total', '카드결제'];
+const RECEIPT_SKIP_LINE = /부가세|부가가치세|세액|과세|면세|할인|거스름|잔돈|포인트|적립|공급가/;
+const CATEGORY_WORDS = [
+  ['카페·간식', /카페|커피|coffee|스타벅스|starbucks|이디야|투썸|메가mgc|메가커피|빽다방|컴포즈|할리스|폴바셋|베이커리|파리바게뜨|뚜레쥬르|배스킨|던킨|디저트/i],
+  ['의료·건강', /약국|병원|의원|치과|한의원|안과|피부과|정형외과|내과|소아과|이비인후과/],
+  ['교통', /주유|주차|택시|버스|철도|코레일|ktx|srt|고속도로|하이패스|충전소|오일뱅크|sk에너지|gs칼텍스|s-oil/i],
+  ['문화·여가', /영화|cgv|메가박스|롯데시네마|서점|교보문고|yes24|노래|pc방|볼링|헬스|공연|티켓/i],
+  ['생활용품', /다이소|이마트|홈플러스|롯데마트|코스트코|트레이더스|하나로마트|마트|생활용품/i],
+  ['쇼핑', /올리브영|백화점|아울렛|무신사|쿠팡|유니클로|자라|h&m|의류/i],
+  ['식비', /식당|음식|김밥|분식|국밥|치킨|피자|버거|맥도날드|롯데리아|맘스터치|서브웨이|반점|짬뽕|족발|보쌈|고기|갈비|삼겹|횟집|초밥|돈까스|라멘|국수|냉면|편의점|gs25|\bcu\b|세븐일레븐|7-eleven|이마트24|미니스톱|도시락|배달의민족|요기요/i],
+];
+
+// 숫자 인식: 12,500 / 12.500(쉼표를 점으로 읽은 경우) / 12500
+function amountsIn(line) {
+  const out = [];
+  for (const m of line.matchAll(/(?<![\d\-:])(\d{1,3}(?:[,.]\d{3})+|\d{3,7})(?![\d\-:])/g)) {
+    const n = Number(m[1].replace(/[,.]/g, ''));
+    if (n >= 100 && n <= 50000000) out.push(n);
+  }
+  return out;
+}
+
+function parseReceipt(text) {
+  const lines = text.split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const squash = (l) => l.replace(/\s/g, '').toLowerCase();
+
+  // 합계 금액: 우선순위가 높은 단어가 있는 줄의 금액 → 없으면 다음 줄 금액
+  let amount = 0;
+  for (const word of RECEIPT_TOTAL_WORDS) {
+    const i = lines.findIndex((l) => squash(l).includes(word) && !RECEIPT_SKIP_LINE.test(squash(l)));
+    if (i < 0) continue;
+    const here = amountsIn(lines[i]);
+    const next = lines[i + 1] ? amountsIn(lines[i + 1]) : [];
+    amount = here.length ? here[here.length - 1] : next[0] || 0;
+    if (amount) break;
+  }
+  if (!amount) {
+    const all = lines
+      .filter((l) => !/사업자|전화|tel|카드번호|승인번호|번호|주소/i.test(l))
+      .flatMap(amountsIn);
+    amount = all.length ? Math.max(...all) : 0;
+  }
+
+  // 날짜: 2026.11.09 / 2026-11-09 / 2026년 11월 9일 / 26.11.09
+  let date = '';
+  const valid = (y, m, d) => m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 2000 && y <= 2099;
+  let m = text.match(/(20\d{2})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})/);
+  if (m && valid(+m[1], +m[2], +m[3])) date = `${m[1]}-${pad(+m[2])}-${pad(+m[3])}`;
+  if (!date) {
+    m = text.match(/(?<!\d)(\d{2})[.\-\/](\d{2})[.\-\/](\d{2})(?!\d)/);
+    if (m && valid(2000 + +m[1], +m[2], +m[3])) date = `20${m[1]}-${m[2]}-${m[3]}`;
+  }
+
+  // 사용처: '상호/가맹점명' 줄 → 없으면 위쪽 6줄 중 가게 이름처럼 보이는 줄
+  let place = '';
+  for (const l of lines) {
+    const pm = l.match(/(?:상호|가맹점명|매장명|점포명|가맹점)\s*[:：]?\s*(.+)/);
+    if (pm) { place = pm[1].split(/대표|사업자|전화|tel/i)[0].trim(); if (place) break; }
+  }
+  if (!place) {
+    place = lines.slice(0, 6).find((l) =>
+      l.length >= 2 && l.length <= 30 && /[가-힣a-zA-Z]/.test(l) &&
+      !/영수증|receipt|사업자|대표|전화|tel|주소|카드|매출|pos|고객|일시|번호|\d{2,4}-\d/i.test(l)) || '';
+  }
+  place = place.replace(/^[\[\(<]+|[\]\)>]+$/g, '').trim().slice(0, 50);
+
+  // 결제수단
+  const s = squash(text);
+  const method = /체크/.test(s) ? '체크카드' : /신용|카드|승인번호/.test(s) ? '신용카드' : /현금/.test(s) ? '현금' : '';
+
+  // 카테고리: 가게 이름과 영수증 내용에서 단어로 추정
+  const hay = place + ' ' + lines.slice(0, 15).join(' ');
+  const hit = CATEGORY_WORDS.find(([, re]) => re.test(hay));
+
+  return { type: '지출', amount, date, place, method, category: hit ? hit[0] : '', memo: '' };
+}
+
+$('receiptBtn').addEventListener('click', () => $('receiptInput').click());
+$('receiptInput').addEventListener('change', async (ev) => {
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  const btn = $('receiptBtn');
+  btn.disabled = true;
+  btn.classList.add('busy');
+  toast('영수증 읽는 중… (5~10초)');
+  try {
+    const text = await Api.ocr(await toJpegBase64(file));
+    const draft = parseReceipt(text || '');
+    openEntry(null, draft);
+    if (!draft.amount) $('entryError').textContent = '금액을 찾지 못했어요. 직접 입력해 주세요.';
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('busy');
+  }
+});
 
 load();
 </script>

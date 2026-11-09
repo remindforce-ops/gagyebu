@@ -34,6 +34,10 @@
     <p class="status" id="status"></p>
   </div>
 
+  <button class="fab receipt" id="receiptBtn" aria-label="영수증 촬영">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+  </button>
+  <input type="file" id="receiptInput" accept="image/*" hidden>
   <button class="fab" id="addBtn" aria-label="내역 추가">+</button>
 
   <!-- 입력/수정 -->
@@ -43,6 +47,7 @@
         <h2 id="entryTitle">내역 추가</h2>
         <button type="button" class="icon-btn" data-close aria-label="닫기">✕</button>
       </div>
+      <p class="hint" id="entryHint" hidden>영수증에서 읽은 값이에요. 맞는지 확인하고 저장하세요.</p>
       <div class="seg" role="radiogroup">
         <label><input type="radio" name="type" value="지출" checked><span>지출</span></label>
         <label><input type="radio" name="type" value="수입"><span>수입</span></label>
