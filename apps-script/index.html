@@ -48,6 +48,10 @@
         <button type="button" class="icon-btn" data-close aria-label="닫기">✕</button>
       </div>
       <p class="hint" id="entryHint" hidden>영수증에서 읽은 값이에요. 맞는지 확인하고 저장하세요.</p>
+      <details class="ocr-raw" id="ocrRaw" hidden>
+        <summary>인식된 글자 보기</summary>
+        <pre id="ocrText"></pre>
+      </details>
       <div class="seg" role="radiogroup">
         <label><input type="radio" name="type" value="지출" checked><span>지출</span></label>
         <label><input type="radio" name="type" value="수입"><span>수입</span></label>

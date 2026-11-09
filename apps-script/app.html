@@ -140,6 +140,8 @@ function openEntry(e = null, draft = null) {
   const v = e || draft;
   $('entryTitle').textContent = e ? '내역 수정' : draft ? '영수증에서 읽은 내역' : '내역 추가';
   $('entryHint').hidden = !draft;
+  $('ocrRaw').hidden = true;
+  $('ocrRaw').open = false;
   $('deleteBtn').hidden = !e;
   $('entryError').textContent = '';
   $('entryForm').querySelector(`input[name="type"][value="${v ? v.type || '지출' : '지출'}"]`).checked = true;
@@ -166,12 +168,61 @@ $('amount').addEventListener('input', (ev) => {
 const toNum = (s) => Number(String(s).replace(/[^\d-]/g, '')) || 0;
 const fmt = (n) => (n ? n.toLocaleString('ko-KR') : '');
 
+// ---------- 품명 자동완성 (초성 검색) ----------
+const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+const syl = (ch) => { const c = ch.charCodeAt(0) - 0xac00; return c >= 0 && c <= 11171 ? c : -1; };
+// 글자 a(품명)가 입력 글자 b와 맞는지: 같은 글자, 초성(ㅅ→서), 입력 중인 마지막 글자(우→울)
+function charMatch(a, b, isLast) {
+  if (a === b) return true;
+  const sa = syl(a);
+  if (sa < 0) return false;
+  if (CHO.includes(b)) return CHO[Math.floor(sa / 588)] === b;
+  const sb = syl(b);
+  return isLast && sb >= 0 && sb % 28 === 0 && Math.floor(sa / 28) === Math.floor(sb / 28);
+}
+function koMatch(name, query) {
+  const n = name.replace(/\s/g, '').toLowerCase();
+  const q = query.replace(/\s/g, '').toLowerCase();
+  if (!q) return false;
+  for (let s = 0; s + q.length <= n.length; s++) {
+    let i = 0;
+    while (i < q.length && charMatch(n[s + i], q[i], i === q.length - 1)) i++;
+    if (i === q.length) return true;
+  }
+  return false;
+}
+// 이전에 입력한 품명을 자주 쓴 순서로
+function knownItemNames() {
+  const count = {};
+  for (const e of state.entries) for (const it of e.items || []) if (it.name) count[it.name] = (count[it.name] || 0) + 1;
+  return Object.keys(count).sort((a, b) => count[b] - count[a]);
+}
+function attachSuggest(input, box) {
+  const show = () => {
+    const q = input.value.trim();
+    const hits = q ? knownItemNames().filter((n) => n !== q && koMatch(n, q)).slice(0, 6) : [];
+    box.replaceChildren(...hits.map((n) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = n;
+      // pointerdown에서 처리해야 입력칸 포커스가 먼저 빠져 목록이 닫히는 문제를 피함
+      b.addEventListener('pointerdown', (ev) => { ev.preventDefault(); input.value = n; box.hidden = true; });
+      return b;
+    }));
+    box.hidden = !hits.length;
+  };
+  input.addEventListener('input', show);
+  input.addEventListener('focus', show);
+  input.addEventListener('blur', () => setTimeout(() => { box.hidden = true; }, 150));
+}
+
 // 한 품목 = 품명 한 줄 + [수량] × [단가] = [금액] [삭제]
 function itemRow(it = {}) {
   const row = document.createElement('div');
   row.className = 'item-row';
   row.innerHTML =
-    '<input class="i-name" maxlength="60" placeholder="품명" autocomplete="off">' +
+    '<input class="i-name" maxlength="60" placeholder="품명 (초성 검색 가능)" autocomplete="off">' +
+    '<div class="suggest" hidden></div>' +
     '<div class="i-nums">' +
     '<input class="i-qty" inputmode="numeric" placeholder="수량" aria-label="수량"><span>×</span>' +
     '<input class="i-price" inputmode="numeric" placeholder="단가" aria-label="단가"><span>=</span>' +
@@ -179,6 +230,7 @@ function itemRow(it = {}) {
     '<button type="button" class="icon-btn i-del" aria-label="품목 삭제">✕</button></div>';
   const [name, qty, price, amount] = ['.i-name', '.i-qty', '.i-price', '.i-amount'].map((s) => row.querySelector(s));
   name.value = it.name || '';
+  attachSuggest(name, row.querySelector('.suggest'));
   qty.value = it.qty || '';
   price.value = fmt(it.price);
   amount.value = fmt(it.amount);
@@ -357,11 +409,17 @@ function parseItems(lines) {
   const SUMMARY = /합계|총액|총금액|결제|과세|면세|부가세|받을|청구|소계|공급가|total/i;
   const NOT_ITEM = /사업자|전화|tel|주소|카드|승인|일시|pos|영수증|대표|가맹점|상호|교환|환불/i;
 
-  const h = lines.findIndex((l) => /(상품명|품명|품목|메뉴명?).*(단가|수량|금액)|^(상품명|품명)$/.test(sq(l)));
+  const h = lines.findIndex((l) => /(상품명?|품명|품목|메뉴명?).*(단가|수량|금액)|^(상품명?|품명|품목)$/.test(sq(l)));
   const hasHeader = h >= 0;
   const start = hasHeader ? h + 1 : 0;
   let end = lines.findIndex((l, i) => i >= start && SUMMARY.test(sq(l)));
   if (end < 0) end = lines.length;
+
+  // 열 단위로 읽힌 표를 먼저 확인 (한 줄 형식 영수증에서는 빈 결과라 아래 줄 단위 인식으로 넘어감)
+  if (hasHeader) {
+    const byColumn = parseItemColumns(lines.slice(start, end), NOT_ITEM);
+    if (byColumn.length) return byColumn.slice(0, 100);
+  }
 
   const items = [];
   let pendingName = '';
@@ -406,6 +464,55 @@ function parseItems(lines) {
     }
   }
   return items.slice(0, 100);
+}
+
+// 구글 드라이브 OCR은 표를 열 단위로 읽는 경우가 많습니다.
+//   서울우유 1L / 신라면 5입 / (단가) 2,650 / 4,980 / (수량) 2 / 1 / (금액) 5,300 / 4,980
+// 품명 N개 다음에 숫자가 2N개 또는 3N개 나오면 열로 보고 짝을 맞춥니다.
+function parseItemColumns(region, NOT_ITEM) {
+  const HEAD_WORD = /^(단가|수량|금액|가격|상품명?|품명|품목|코드|바코드)$/;
+  const isNumLine = (l) => /^-?\d{1,3}(?:[,.]\d{3})+-?$|^-?\d{1,7}-?$/.test(l.replace(/\s|원/g, ''));
+  const val = (t) => (/^-|-$/.test(t.trim()) ? -1 : 1) * Number(t.replace(/[^\d]/g, ''));
+  const names = [];
+  const nums = [];
+  for (const raw of region) {
+    const l = raw.trim();
+    const s = l.replace(/\s/g, '');
+    if (HEAD_WORD.test(s)) continue;
+    if (/^\d{8,14}$/.test(s)) continue;                   // 바코드만 있는 줄
+    if (isNumLine(l)) { nums.push(val(l)); continue; }
+    if (/[가-힣a-zA-Z]/.test(l) && !NOT_ITEM.test(l) && !/할인|쿠폰/.test(l)) {
+      names.push(l.replace(/^\d{1,3}\s+/, '').replace(/^[*#P]\s*/, '').replace(/\b\d{8,14}\b/g, '').trim());
+    }
+  }
+  const k = names.length;
+  if (!k) return [];
+  const ok = (list) => list.filter((it) => it.qty && it.price * it.qty === it.amount).length >= Math.ceil(k * 0.6);
+
+  if (nums.length >= 3 * k) {
+    const v = nums.slice(0, 3 * k);
+    const col = (i) => v.slice(i * k, (i + 1) * k);
+    const tries = [
+      [col(0), col(1), col(2)],                                   // 단가 열, 수량 열, 금액 열
+      [col(1), col(0), col(2)],                                   // 수량 열, 단가 열, 금액 열
+      [0, 1, 2].map((j) => names.map((_, i) => v[i * 3 + j])),    // 품목마다 단가 수량 금액
+      [1, 0, 2].map((j) => names.map((_, i) => v[i * 3 + j])),    // 품목마다 수량 단가 금액
+    ];
+    for (const [p, q, a] of tries) {
+      const list = names.map((name, i) => ({ name, qty: q[i], price: p[i], amount: a[i] }));
+      if (ok(list)) return list;
+    }
+  }
+  if (nums.length >= 2 * k) {
+    const v = nums.slice(0, 2 * k);
+    const pairs = [[v.slice(0, k), v.slice(k)], [0, 1].map((j) => names.map((_, i) => v[i * 2 + j]))];
+    for (const [q, a] of pairs) {
+      if (q.every((x) => x > 0 && x <= 99) && a.every((x) => x >= 100)) {
+        return names.map((name, i) => ({ name, qty: q[i], price: Math.round(a[i] / q[i]), amount: a[i] }));
+      }
+    }
+  }
+  return [];
 }
 
 function parseReceipt(text) {
@@ -476,6 +583,8 @@ $('receiptInput').addEventListener('change', async (ev) => {
     const text = await Api.ocr(await toJpegBase64(file));
     const draft = parseReceipt(text || '');
     openEntry(null, draft);
+    $('ocrText').textContent = text || '(읽은 글자가 없어요)';
+    $('ocrRaw').hidden = false;
     if (!draft.amount) $('entryError').textContent = '금액을 찾지 못했어요. 직접 입력해 주세요.';
   } catch (err) {
     toast(err.message);
